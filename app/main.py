@@ -99,33 +99,24 @@ def update_profile(username, post_hash):
     
     # Publish to IPFS and IPNS
     ipfs_hash = None
+    ipns_key = None
     if is_ipfs_running():
         try:
-            # Load or create config
-            if os.path.exists(CONFIG_PATH):
-                with open(CONFIG_PATH, 'r') as f:
-                    config = json.load(f)
-            else:
-                config = {'username': username}
+            # Check and generate IPNS key for username if needed
+            keys = subprocess.run(['ipfs', 'key', 'list'], capture_output=True, text=True, check=True).stdout.splitlines()
+            if username not in keys:
+                subprocess.run(['ipfs', 'key', 'gen', '--type=ed25519', username], check=True)
             
-            if 'ipns_key' not in config:
-                # Generate key if not exists
-                keys = subprocess.run(['ipfs', 'key', 'list'], capture_output=True, text=True, check=True).stdout.splitlines()
-                if username not in keys:
-                    subprocess.run(['ipfs', 'key', 'gen', '--type=ed25519', username], check=True)
-                
-                # Get IPNS key CID
-                key_lines = subprocess.run(['ipfs', 'key', 'list', '-l'], capture_output=True, text=True, check=True).stdout.splitlines()
-                for line in key_lines:
-                    parts = line.split()
-                    if len(parts) == 2 and parts[1] == username:
-                        config['ipns_key'] = parts[0]
-                        break
-                
-                if 'ipns_key' in config:
-                    with open(CONFIG_PATH, 'w') as f:
-                        json.dump(config, f, indent=4)
-                    print(f"Share this IPNS key with followers: {config['ipns_key']}")
+            # Get IPNS key CID
+            key_lines = subprocess.run(['ipfs', 'key', 'list', '-l'], capture_output=True, text=True, check=True).stdout.splitlines()
+            for line in key_lines:
+                parts = line.split()
+                if len(parts) == 2 and parts[1] == username:
+                    ipns_key = parts[0]
+                    break
+            
+            if ipns_key:
+                print(f"Share this IPNS key with followers: {ipns_key}")
             
             # Add profile to IPFS
             result = subprocess.run(['ipfs', 'add', '-q', profile_path], capture_output=True, text=True, check=True)
@@ -133,22 +124,23 @@ def update_profile(username, post_hash):
             print(f"Profile updated: {ipfs_hash}")
             
             # Publish to IPNS with animation
-            cmd = ['ipfs', 'name', 'publish', '--key=' + username, '/ipfs/' + ipfs_hash]
-            print("Publishing to IPNS... ", end='', flush=True)
-            spinner = itertools.cycle(['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'])
-            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            while process.poll() is None:
-                sys.stdout.write(next(spinner))
-                sys.stdout.flush()
-                time.sleep(0.2)
-                sys.stdout.write('\b')
-            stdout, stderr = process.communicate()
-            print()  # Newline after spinner
-            if process.returncode != 0:
-                print(f"Failed to publish to IPNS: {stderr.strip()}")
-                raise subprocess.CalledProcessError(process.returncode, cmd, stdout, stderr)
-            else:
-                print(stdout.strip())
+            if ipns_key:
+                cmd = ['ipfs', 'name', 'publish', '--key=' + username, '/ipfs/' + ipfs_hash]
+                print("Publishing to IPNS... ", end='', flush=True)
+                spinner = itertools.cycle(['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'])
+                process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                while process.poll() is None:
+                    sys.stdout.write(next(spinner))
+                    sys.stdout.flush()
+                    time.sleep(0.2)
+                    sys.stdout.write('\b')
+                stdout, stderr = process.communicate()
+                print()  # Newline after spinner
+                if process.returncode != 0:
+                    print(f"Failed to publish to IPNS: {stderr.strip()}")
+                    raise subprocess.CalledProcessError(process.returncode, cmd, stdout, stderr)
+                else:
+                    print(stdout.strip())
         except subprocess.CalledProcessError as e:
             print(f"Failed to update profile on IPFS/IPNS: {e}")
     
