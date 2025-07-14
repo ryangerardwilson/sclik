@@ -1,3 +1,4 @@
+# ~/Apps/sclik/app/main.py (updated)
 import subprocess
 import sqlite3
 import os
@@ -7,6 +8,8 @@ import argparse
 import tempfile
 import sys
 import itertools
+
+from ipfs_setup_handler import IpfsSetupHandler
 
 # Configuration
 HOME_DIR = os.path.expanduser("~/.sclik")
@@ -58,27 +61,6 @@ def get_own_username():
     
     return username
 
-# Check if IPFS daemon is running
-def is_ipfs_running():
-    try:
-        subprocess.run(['ipfs', 'swarm', 'peers'], capture_output=True, text=True, check=True)
-        return True
-    except subprocess.CalledProcessError:
-        return False
-    except FileNotFoundError:
-        print("ALERT! 'ipfs' command not found.\n")
-        print("To install Kubo (IPFS) v0.35.0 on Linux amd64:\n")
-        print("wget https://dist.ipfs.tech/kubo/v0.35.0/kubo_v0.35.0_linux-amd64.tar.gz")
-        print("tar -xvzf kubo_v0.35.0_linux-amd64.tar.gz")
-        print("cd kubo")
-        print("sudo bash install.sh")
-        print("cd ..")
-        print("rm -rf kubo kubo_v0.35.0_linux-amd64.tar.gz")
-        print("\nNow, in a seperate terminal, run:\n")
-        print("ipfs init; ipfs daemon &")
-        sys.exit(1)  # Exit if IPFS not installed
-        return False
-
 # Update user profile with post hash and publish to IPNS
 def update_profile(username, post_hash):
     profile_path = os.path.join(PROFILE_DIR, f"{username}.json")
@@ -100,48 +82,49 @@ def update_profile(username, post_hash):
     # Publish to IPFS and IPNS
     ipfs_hash = None
     ipns_key = None
-    if is_ipfs_running():
-        try:
-            # Check and generate IPNS key for username if needed
-            keys = subprocess.run(['ipfs', 'key', 'list'], capture_output=True, text=True, check=True).stdout.splitlines()
-            if username not in keys:
-                subprocess.run(['ipfs', 'key', 'gen', '--type=ed25519', username], check=True)
-            
-            # Get IPNS key CID
-            key_lines = subprocess.run(['ipfs', 'key', 'list', '-l'], capture_output=True, text=True, check=True).stdout.splitlines()
-            for line in key_lines:
-                parts = line.split()
-                if len(parts) == 2 and parts[1] == username:
-                    ipns_key = parts[0]
-                    break
-            
-            if ipns_key:
-                print(f"Share this IPNS key with followers: {ipns_key}")
-            
-            # Add profile to IPFS
-            result = subprocess.run(['ipfs', 'add', '-q', profile_path], capture_output=True, text=True, check=True)
-            ipfs_hash = result.stdout.strip()
-            
-            # Publish to IPNS with animation
-            if ipns_key:
-                cmd = ['ipfs', 'name', 'publish', '--key=' + username, '/ipfs/' + ipfs_hash]
-                print("Publishing to IPNS... ", end='', flush=True)
-                spinner = itertools.cycle(['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'])
-                process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-                while process.poll() is None:
-                    sys.stdout.write(next(spinner))
-                    sys.stdout.flush()
-                    time.sleep(0.2)
-                    sys.stdout.write('\b')
-                stdout, stderr = process.communicate()
-                print()  # Newline after spinner
-                if process.returncode != 0:
-                    print(f"Failed to publish to IPNS: {stderr.strip()}")
-                    raise subprocess.CalledProcessError(process.returncode, cmd, stdout, stderr)
-                else:
-                    print(stdout.strip())
-        except subprocess.CalledProcessError as e:
-            print(f"Failed to update profile on IPFS/IPNS: {e}")
+    ipfs_handler = IpfsSetupHandler()
+    ipfs_handler.ensure_running()
+    try:
+        # Check and generate IPNS key for username if needed
+        keys = subprocess.run(['ipfs', 'key', 'list'], capture_output=True, text=True, check=True).stdout.splitlines()
+        if username not in keys:
+            subprocess.run(['ipfs', 'key', 'gen', '--type=ed25519', username], check=True)
+        
+        # Get IPNS key CID
+        key_lines = subprocess.run(['ipfs', 'key', 'list', '-l'], capture_output=True, text=True, check=True).stdout.splitlines()
+        for line in key_lines:
+            parts = line.split()
+            if len(parts) == 2 and parts[1] == username:
+                ipns_key = parts[0]
+                break
+        
+        if ipns_key:
+            print(f"Share this IPNS key with followers: {ipns_key}")
+        
+        # Add profile to IPFS
+        result = subprocess.run(['ipfs', 'add', '-q', profile_path], capture_output=True, text=True, check=True)
+        ipfs_hash = result.stdout.strip()
+        
+        # Publish to IPNS with animation
+        if ipns_key:
+            cmd = ['ipfs', 'name', 'publish', '--key=' + username, '/ipfs/' + ipfs_hash]
+            print("Publishing to IPNS... ", end='', flush=True)
+            spinner = itertools.cycle(['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'])
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            while process.poll() is None:
+                sys.stdout.write(next(spinner))
+                sys.stdout.flush()
+                time.sleep(0.2)
+                sys.stdout.write('\b')
+            stdout, stderr = process.communicate()
+            print()  # Newline after spinner
+            if process.returncode != 0:
+                print(f"Failed to publish to IPNS: {stderr.strip()}")
+                raise subprocess.CalledProcessError(process.returncode, cmd, stdout, stderr)
+            else:
+                print(stdout.strip())
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to update profile on IPFS/IPNS: {e}")
     
     # Store profile hash in config
     if os.path.exists(CONFIG_PATH):
@@ -163,25 +146,24 @@ def post(content):
     ipfs_hash = None
     
     # Try publishing to IPFS
-    if is_ipfs_running():
-        try:
-            # Write post to a temporary file
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp:
-                json.dump(post_data, tmp, indent=4)
-                tmp_path = tmp.name
-            
-            # Run ipfs add
-            result = subprocess.run(['ipfs', 'add', '-q', tmp_path], capture_output=True, text=True, check=True)
-            ipfs_hash = result.stdout.strip()
-            
-            # Clean up
-            os.remove(tmp_path)
-        except subprocess.CalledProcessError as e:
-            print(f"Failed to publish to IPFS: {e}. Storing locally only.")
-        except Exception as e:
-            print(f"Unexpected error with IPFS: {e}. Storing locally only.")
-    else:
-        print("IPFS daemon not running. Storing locally only.")
+    ipfs_handler = IpfsSetupHandler()
+    ipfs_handler.ensure_running()
+    try:
+        # Write post to a temporary file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp:
+            json.dump(post_data, tmp, indent=4)
+            tmp_path = tmp.name
+        
+        # Run ipfs add
+        result = subprocess.run(['ipfs', 'add', '-q', tmp_path], capture_output=True, text=True, check=True)
+        ipfs_hash = result.stdout.strip()
+        
+        # Clean up
+        os.remove(tmp_path)
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to publish to IPFS: {e}. Storing locally only.")
+    except Exception as e:
+        print(f"Unexpected error with IPFS: {e}. Storing locally only.")
     
     # Store locally
     conn = sqlite3.connect(DB_PATH)
@@ -197,40 +179,39 @@ def post(content):
 # Follow a user by IPNS key (auto-discover username)
 def follow(ipns_key):
     get_own_username()  # Ensure own username is set, even if not used directly
-    if is_ipfs_running():
-        try:
-            # Resolve IPNS to get latest profile hash
-            result = subprocess.run(['ipfs', 'name', 'resolve', ipns_key], capture_output=True, text=True, check=True)
-            resolved_path = result.stdout.strip()  # /ipfs/Qm...
-            profile_hash = resolved_path.replace('/ipfs/', '')
-            
-            # Fetch profile to get username
-            result = subprocess.run(['ipfs', 'cat', profile_hash], capture_output=True, text=True, check=True)
-            profile = json.loads(result.stdout)
-            target_username = profile.get("username")
-            if not target_username:
-                raise ValueError("Profile does not contain a username.")
-            
-            # Store in follows table
-            conn = sqlite3.connect(DB_PATH)
-            c = conn.cursor()
-            c.execute("INSERT OR REPLACE INTO follows (username, ipns_key) VALUES (?, ?)",
-                      (target_username, ipns_key))
-            conn.commit()
-            conn.close()
-            print(f"Following {target_username} with IPNS key {ipns_key}")
-        except subprocess.CalledProcessError as e:
-            print(f"Error resolving/fetching profile: {e}")
-        except Exception as e:
-            print(f"Error following user: {e}")
-    else:
-        print("Error: IPFS daemon not running. Cannot follow users.")
+    ipfs_handler = IpfsSetupHandler()
+    ipfs_handler.ensure_running()
+    try:
+        # Resolve IPNS to get latest profile hash
+        result = subprocess.run(['ipfs', 'name', 'resolve', ipns_key], capture_output=True, text=True, check=True)
+        resolved_path = result.stdout.strip()  # /ipfs/Qm...
+        profile_hash = resolved_path.replace('/ipfs/', '')
+        
+        # Fetch profile to get username
+        result = subprocess.run(['ipfs', 'cat', profile_hash], capture_output=True, text=True, check=True)
+        profile = json.loads(result.stdout)
+        target_username = profile.get("username")
+        if not target_username:
+            raise ValueError("Profile does not contain a username.")
+        
+        # Store in follows table
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("INSERT OR REPLACE INTO follows (username, ipns_key) VALUES (?, ?)",
+                  (target_username, ipns_key))
+        conn.commit()
+        conn.close()
+        print(f"Following {target_username} with IPNS key {ipns_key}")
+    except subprocess.CalledProcessError as e:
+        print(f"Error resolving/fetching profile: {e}")
+    except Exception as e:
+        print(f"Error following user: {e}")
 
 # View feed
 def view_feed(limit):
     username = get_own_username()  # Ensure set, though not directly used
-    if not is_ipfs_running():
-        print("IPFS daemon not running. Displaying local posts only.")
+    ipfs_handler = IpfsSetupHandler()
+    ipfs_handler.ensure_running()
     
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -245,41 +226,40 @@ def view_feed(limit):
     posts.extend(c.fetchall())
     
     # Fetch posts from followed users via IPNS and IPFS (on-demand)
-    if is_ipfs_running():
-        for follow_username, ipns_key in follows:
-            if ipns_key:
-                try:
-                    # Resolve IPNS to get latest profile hash with animation
-                    cmd = ['ipfs', 'name', 'resolve', ipns_key]
-                    print(f"Resolving IPNS for {follow_username}... ", end='', flush=True)
-                    spinner = itertools.cycle(['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'])
-                    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-                    while process.poll() is None:
-                        sys.stdout.write(next(spinner))
-                        sys.stdout.flush()
-                        time.sleep(0.2)
-                        sys.stdout.write('\b')
-                    stdout, stderr = process.communicate()
-                    print()  # Newline after spinner
-                    if process.returncode != 0:
-                        print(f"Error resolving IPNS for {follow_username}: {stderr.strip()}")
-                        continue
-                    resolved_path = stdout.strip()  # /ipfs/Qm...
-                    profile_hash = resolved_path.replace('/ipfs/', '')
-                    
-                    # Fetch profile (contains post hashes)
-                    result = subprocess.run(['ipfs', 'cat', profile_hash], capture_output=True, text=True, check=True)
-                    profile = json.loads(result.stdout)
-                    post_hashes = profile.get("posts", [])
-                    for post_hash in post_hashes:
-                        try:
-                            result = subprocess.run(['ipfs', 'cat', post_hash], capture_output=True, text=True, check=True)
-                            post = json.loads(result.stdout)
-                            posts.append((post["user"], post["content"], post["timestamp"]))
-                        except subprocess.CalledProcessError as e:
-                            print(f"Error fetching post {post_hash} for {follow_username}: {e}")
-                except Exception as e:
-                    print(f"Unexpected error fetching posts for {follow_username}: {e}")
+    for follow_username, ipns_key in follows:
+        if ipns_key:
+            try:
+                # Resolve IPNS to get latest profile hash with animation
+                cmd = ['ipfs', 'name', 'resolve', ipns_key]
+                print(f"Resolving IPNS for {follow_username}... ", end='', flush=True)
+                spinner = itertools.cycle(['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'])
+                process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                while process.poll() is None:
+                    sys.stdout.write(next(spinner))
+                    sys.stdout.flush()
+                    time.sleep(0.2)
+                    sys.stdout.write('\b')
+                stdout, stderr = process.communicate()
+                print()  # Newline after spinner
+                if process.returncode != 0:
+                    print(f"Error resolving IPNS for {follow_username}: {stderr.strip()}")
+                    continue
+                resolved_path = stdout.strip()  # /ipfs/Qm...
+                profile_hash = resolved_path.replace('/ipfs/', '')
+                
+                # Fetch profile (contains post hashes)
+                result = subprocess.run(['ipfs', 'cat', profile_hash], capture_output=True, text=True, check=True)
+                profile = json.loads(result.stdout)
+                post_hashes = profile.get("posts", [])
+                for post_hash in post_hashes:
+                    try:
+                        result = subprocess.run(['ipfs', 'cat', post_hash], capture_output=True, text=True, check=True)
+                        post = json.loads(result.stdout)
+                        posts.append((post["user"], post["content"], post["timestamp"]))
+                    except subprocess.CalledProcessError as e:
+                        print(f"Error fetching post {post_hash} for {follow_username}: {e}")
+            except Exception as e:
+                print(f"Unexpected error fetching posts for {follow_username}: {e}")
     
     conn.close()
     
@@ -305,8 +285,9 @@ def main():
     # Print ASCII art on startup
     print(ASCII_ART)
     
-    # Check for IPFS dependency at the start
-    is_ipfs_running()
+    # Ensure IPFS is set up at the start
+    ipfs_handler = IpfsSetupHandler()
+    ipfs_handler.ensure_running()
     
     parser = argparse.ArgumentParser(
         description="Decentralized Terminal Social Network",
