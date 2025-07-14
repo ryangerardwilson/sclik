@@ -121,7 +121,6 @@ def update_profile(username, post_hash):
             # Add profile to IPFS
             result = subprocess.run(['ipfs', 'add', '-q', profile_path], capture_output=True, text=True, check=True)
             ipfs_hash = result.stdout.strip()
-            print(f"Profile updated: {ipfs_hash}")
             
             # Publish to IPNS with animation
             if ipns_key:
@@ -174,7 +173,6 @@ def post(content):
             # Run ipfs add
             result = subprocess.run(['ipfs', 'add', '-q', tmp_path], capture_output=True, text=True, check=True)
             ipfs_hash = result.stdout.strip()
-            print(f"Post published: {ipfs_hash}")
             
             # Clean up
             os.remove(tmp_path)
