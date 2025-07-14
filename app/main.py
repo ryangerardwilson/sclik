@@ -9,7 +9,7 @@ import tempfile
 import sys
 import itertools
 
-from ipfs_setup_handler import IpfsSetupHandler
+from sclik.app.ipfs_setup_handler import IpfsSetupHandler
 
 # Configuration
 HOME_DIR = os.path.expanduser("~/.sclik")
