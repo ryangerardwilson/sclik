@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sclik"
+version = "0.1.0"
+description = "A decentralized terminal social network using IPFS."
+readme = "README.md"
+requires-python = ">=3.6"
+license = "MIT"
+
+authors = [
+  { name = "Ryan Gerard Wilson", email = "ryan@wilsonfamilyoffice.com" }
+]
+
+dependencies = []
+
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent"
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/sclik"
+Issues   = "https://github.com/yourusername/sclik/issues"
+
+[project.entry-points."console_scripts"]
+sclik = "sclik.main:main"
